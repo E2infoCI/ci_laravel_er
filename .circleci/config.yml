@@ -1,0 +1,79 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/php:7.2-apache-node-browsers
+        environment:
+        - APP_DEBUG: true
+        - APP_ENV: testing
+        - DB_HOST=127.0.0.1
+        - DB_PORT=3306
+        - DB_DATABASE=circleci
+        - DB_USERNAME=circleci
+        - DB_PASSWORD=circleci
+      - image: circleci/mysql:5.7
+        environment:
+        - MYSQL_ROOT_PASSWORD=circleci
+        - MYSQL_DATABASE=circleci
+        - MYSQL_USER=circleci
+        - MYSQL_PASSWORD=circleci
+
+    working_directory: ~/laravel
+
+    steps:
+      - checkout
+
+      - run:
+          name: module install
+          command: |
+            sudo docker-php-ext-install pdo_mysql
+            sudo apt install -y mysql-client
+            sudo apt-get install -y graphviz
+
+      - restore_cache:
+          keys:
+          - v1-dependencies-{{ checksum "src/composer.json" }}
+          - v1-dependencies-
+
+      - run:
+          name: composer self-update
+          working_directory: src
+          command: sudo composer self-update
+
+      - run:
+          name: composer install
+          working_directory: src
+          command: composer install -n --prefer-dist
+
+      - save_cache:
+          paths:
+            - ./src/vendor
+          key: v1-dependencies-{{ checksum "src/composer.json" }}
+
+      - run:
+          name: php artisan migrate
+          working_directory: src
+          command: php artisan migrate
+
+      - run:
+          name: mkdir & change permissions
+          command: |
+            sudo mkdir -p /output
+            sudo chmod 777 /output
+
+      - run:
+          name: mysqldump
+          command: sudo mysqldump -h 127.0.0.1 -u circleci -d circleci -pcircleci > /output/mysqldump.sql
+
+      - run:
+          name: Run mysqlviz
+          working_directory: src
+          command: |
+            mv ../ci/vendor/mysqlviz ./vendor/
+            php ./vendor/mysqlviz/mysqlviz -f /output/mysqldump.sql > /output/mysqldump.dot
+            dot -Tpng /output/mysqldump.dot > /output/mysqldump.png
+
+      - store_artifacts:
+          path: /output
+          destination: reports
+
